@@ -1,0 +1,19 @@
+# Replace with your real domain/subdomain (e.g. go.yourdomain.com).
+
+# Caddy issues and renews the SSL certificate automatically the first
+
+# time it gets a real request - no certbot, no manual steps.
+
+#
+
+# Install: apt install caddy (or see https://caddyserver.com/docs/install)
+
+# Run: sudo caddy run --config /etc/caddy/Caddyfile
+
+# Or as a service: sudo systemctl enable --now caddy
+
+# (put this file at /etc/caddy/Caddyfile)
+
+go.yourdomain.com {
+reverse_proxy localhost:3000
+}
