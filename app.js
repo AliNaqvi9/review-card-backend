@@ -10,6 +10,7 @@ const {
   dashboardPage,
   editPage,
   clientEditPage,
+  clientNamePage,
   editLinkNotFoundPage,
 } = require("./lib/views");
 
@@ -63,6 +64,9 @@ const stmts = {
   ),
   updateToken: db.prepare("UPDATE cards SET edit_token = ? WHERE id = ?"),
   remove: db.prepare("DELETE FROM cards WHERE id = ?"),
+  updateClientName: db.prepare(
+    "UPDATE cards SET client_name = ? Where edit_token=?",
+  ),
 };
 
 // Batched insert for bulk-generating blank/unclaimed cards - wrapping in
@@ -121,7 +125,23 @@ app.get("/", (req, res) => res.redirect("/admin"));
 app.get("/edit/:token", (req, res) => {
   const card = stmts.getByToken.get(req.params.token);
   if (!card) return res.status(404).send(editLinkNotFoundPage());
+  if (!card.client_name) {
+    //first diplay a page where user updates it's name then redirect it to client editPage
+    return res.send(clientNamePage({ token: req.params.token }));
+  }
   res.send(clientEditPage({ card }));
+});
+
+app.post("/edit/:token/name", (req, res) => {
+  const card = stmts.getByToken.get(req.params.token);
+
+  if (!card) return res.status(404).send(editLinkNotFoundPage());
+
+  const clientName = req.body.client_name;
+
+  stmts.updateClientName.run(clientName, req.params.token);
+
+  res.redirect(`/edit/${req.params.token}`);
 });
 
 app.post("/edit/:token", (req, res) => {
@@ -140,6 +160,19 @@ app.post("/edit/:token", (req, res) => {
     clientEditPage({
       card: { ...card, destination_url: destinationUrl },
       success: true,
+    }),
+  );
+});
+
+app.get("/edit/:token/name", (req, res) => {
+  const card = stmts.getByToken.get(req.params.token);
+
+  if (!card) return res.status(404).send(editLinkNotFoundPage());
+
+  res.send(
+    clientNamePage({
+      token: req.params.token,
+      error: null,
     }),
   );
 });
@@ -242,8 +275,10 @@ app.post("/admin/cards/bulk", requireAuth, (req, res) => {
 app.get("/admin/unclaimed.csv", requireAuth, (req, res) => {
   const base = baseUrlFor(req);
   const unclaimed = stmts.listAll.all().filter((c) => !c.destination_url);
-  const header = "id,url\n";
-  const body = unclaimed.map((c) => `${c.id},${base}/c/${c.id}`).join("\n");
+  const header = "id,url,edit_token\n";
+  const body = unclaimed
+    .map((c) => `${c.id},${base}/c/${c.id},${base}/edit/${c.edit_token}`)
+    .join("\n");
   res.set("Content-Type", "text/csv; charset=utf-8");
   res.set("Content-Disposition", 'attachment; filename="unclaimed-cards.csv"');
   res.send(header + body + (body ? "\n" : ""));
