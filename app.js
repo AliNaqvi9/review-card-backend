@@ -187,6 +187,9 @@ app.get("/edit/:token/name", (req, res) => {
 
 // ---- auth -----------------------------------------------------------------
 app.get("/admin/login", (req, res) => {
+    if (req.session?.authenticated) {
+    return res.redirect("/admin");
+  }
   const ip = req.ip;
 
   if (loginGuard.isLocked(ip)) {
