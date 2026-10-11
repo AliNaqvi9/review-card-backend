@@ -13,7 +13,7 @@ const {
   clientNamePage,
   editLinkNotFoundPage,
 } = require("./lib/views");
-
+const loginGuard = require("./lib/login-guard");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
@@ -137,7 +137,15 @@ app.post("/edit/:token/name", (req, res) => {
 
   if (!card) return res.status(404).send(editLinkNotFoundPage());
 
-  const clientName = req.body.client_name;
+  const clientName = (req.body.client_name || "").trim().slice(0, 100);
+  if (!clientName) {
+    return res.status(400).send(
+      clientNamePage({
+        token: req.params.token,
+        error: "Please enter a name.",
+      }),
+    );
+  }
 
   stmts.updateClientName.run(clientName, req.params.token);
 
@@ -179,11 +187,39 @@ app.get("/edit/:token/name", (req, res) => {
 
 // ---- auth -----------------------------------------------------------------
 app.get("/admin/login", (req, res) => {
-  if (req.session && req.session.authenticated) return res.redirect("/admin");
-  res.send(loginPage({}));
+  const ip = req.ip;
+
+  if (loginGuard.isLocked(ip)) {
+    const mins = loginGuard.minutesRemaining(ip);
+
+    return res.status(429).send(
+      loginPage({
+        error: `Too many attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.`,
+      }),
+    );
+  }
+  const record = loginGuard.getRecord(ip);
+  const failedCount = record?.count ?? 0;
+  if (req.query.error === "wrong" && failedCount > 0) {
+    const count_atm = Math.max(0, loginGuard.MAX_ATTEMPTS - failedCount);
+
+    return res.status(401).send(
+      loginPage({
+        error: `Wrong password. ${count_atm} attempt${count_atm === 1 ? "" : "s"} left.`,
+      }),
+    );
+  }
+
+  return res.send(loginPage({}));
 });
 
 app.post("/admin/login", async (req, res) => {
+  const ip = req.ip;
+  const mins = loginGuard.minutesRemaining(ip);
+  // check the lock first
+  if (loginGuard.isLocked(ip)) {
+    return res.redirect(303, "/admin/login");
+  }
   const { password } = req.body;
   const hash = process.env.ADMIN_PASSWORD_HASH;
 
@@ -194,10 +230,18 @@ app.post("/admin/login", async (req, res) => {
         loginPage({ error: "Server has no admin password configured yet." }),
       );
   }
-  if (!password || !(await bcrypt.compare(password, hash))) {
-    return res.status(401).send(loginPage({ error: "Wrong password." }));
+  if (!password) {
+    return res
+      .status(400)
+      .send(loginPage({ error: "Please enter your password." }));
   }
 
+  if (!(await bcrypt.compare(password, hash))) {
+    loginGuard.recordFailure(ip);
+
+    return res.redirect(303, "/admin/login?error=wrong");
+  }
+  loginGuard.clearAttempts(ip);
   req.session.regenerate((err) => {
     if (err)
       return res
